@@ -276,7 +276,7 @@ class LipSyncInference:
                     base=base,
                     span=span, # Dejamos un 10% del span para el merge de audio
                     value=i / total,
-                    desc=f"Upscale {i}/{total}"
+                    desc=f"Mejorando... {i}/{total}"
                 )
 
             i += 1
