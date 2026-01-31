@@ -141,11 +141,11 @@ class LipSyncInference:
         
         if(self.restorer == None):
                  # ESRGAN para super-resolución
-                model_esrgan = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
+                """model_esrgan = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
                 self.restorer = RealESRGANer(
                     scale=2, model_path="checkpoints/RealESRGAN_x2plus.pth",
                     model=model_esrgan, half=(self.device == 'cuda'), device=self.device
-                )
+                )"""
 
                  # GFPGAN para restauración facial
                 self.restorer2 = GFPGANer(
