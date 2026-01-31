@@ -18,6 +18,7 @@ VOCES_DIR = "voces"
 if args.colab:
     BASE_VOZ = "/content/drive/MyDrive/LatentLipSyncLite"
     VOCES_DIR = os.path.join(BASE_VOZ, "voces")
+    os.makedirs(VOCES_DIR, exist_ok=True)
 
 def list_local_voices():
     path = Path(VOCES_DIR)
@@ -119,8 +120,6 @@ def process_sync(
     except Exception as e:
         raise gr.Error(f"Error: {e}")
 
-print("📂 WORKDIR =", WORKDIR)
-print("📦 CACHE_DIR =", CACHE_DIR)
 print("📦 VOCES_DIR =", VOCES_DIR)
 
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
@@ -200,4 +199,4 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(share=True)
