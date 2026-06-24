@@ -2,11 +2,15 @@ import torch
 import gc
 import os
 import soundfile as sf
+from pathlib import Path
 from transformers import pipeline
 from qwen_tts import Qwen3TTSModel
 import uuid
 
-VOCES_DIR = "voces"
+import tts_service as _tts_module
+_tts_module.VOCES_DIR = "voces"
+
+VOCES_DIR = _tts_module.VOCES_DIR
 
 class TTSService:
     _instance = None
@@ -58,20 +62,23 @@ class TTSService:
         return self.whisper
 
     def generate(self, text, voice_name, ref_audio=None, ref_text=None):
-        is_custom = voice_name in self.predefined_voices
+        voice_key = Path(voice_name).stem
+        is_custom = voice_key in self.predefined_voices
         mode = "custom" if is_custom else "base"
         self.load_model(mode)
+
+        voces_dir = _tts_module.VOCES_DIR
 
         with torch.no_grad():
             if is_custom:
                 wavs, sr = self.model.generate_custom_voice(
                     text=text,
                     language="Auto",
-                    speaker=voice_name,
+                    speaker=voice_key,
                     instruct="Natural"
                 )
             else:
-                audio_path = os.path.join(VOCES_DIR, voice_name) if not ref_audio else ref_audio
+                audio_path = os.path.join(voces_dir, voice_name)
 
                 if not ref_text:
                     asr = self.get_whisper()

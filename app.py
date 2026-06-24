@@ -2,8 +2,10 @@ import gradio as gr
 import shutil
 from pathlib import Path
 
+from stt_service import STTService, DEFAULT_MODEL as DEFAULT_STT_MODEL
 from utils.files import create_run_dir
 from utils.validation import validate_file
+from utils.ffmpeg import extract_audio
 from lipsync import LipSyncService
 import argparse
 import sys
@@ -20,8 +22,8 @@ if args.colab:
     VOCES_DIR = os.path.join(BASE_VOZ, "voces")
     os.makedirs(VOCES_DIR, exist_ok=True)
 
-    from tts_service import TTSService
-    TTSService.VOCES_DIR = VOCES_DIR
+    import tts_service
+    tts_service.VOCES_DIR = VOCES_DIR
 
 def list_local_voices():
     path = Path(VOCES_DIR)
@@ -29,6 +31,10 @@ def list_local_voices():
     locals = [p.name for p in path.glob("*.wav")]
     predefined = ["Sohee", "Vivian", "Serena", "Uncle_Fu", "Dylan", "Eric", "Ryan", "Aiden", "Ono_Anna"]
     return predefined + locals
+
+def refresh_voices():
+    gr.Info("Voces actualizadas")
+    return gr.Dropdown(choices=list_local_voices())
 
 def process_tts(text, voice, ref_text):
     from tts_service import TTSService
@@ -155,6 +161,61 @@ def process_sync(
     except Exception as e:
         raise gr.Error(f"Error: {e}")
 
+def process_stt(audio_input, video_input, model_name, language, timestamps, progress=gr.Progress()):
+    audio_path = audio_input
+    video_path = get_video_path(video_input)
+
+    if not audio_path and not video_path:
+        raise gr.Error("Sube un audio o un video para transcribir")
+
+    try:
+        if not audio_path:
+            validate_file(video_path, [".mp4", ".mov", ".mkv", ".avi", ".webm"])
+            run_id, run_dir, _ = create_run_dir()
+            audio_in = run_dir / "audio.wav"
+            progress(0.1, desc="Extrayendo audio del video...")
+            extract_audio(video_path, str(audio_in))
+            audio_path = str(audio_in)
+        else:
+            validate_file(audio_path, [".wav", ".mp3", ".flac", ".ogg", ".m4a"])
+
+        progress(0.3, desc=f"Cargando modelo {model_name}...")
+        service = STTService.get()
+
+        progress(0.5, desc="Transcribiendo...")
+        result = service.transcribe(
+            audio_path=audio_path,
+            model_name=model_name,
+            language=language,
+            return_timestamps=timestamps,
+        )
+
+        text = result["text"]
+        segments = result.get("segments")
+
+        if timestamps and segments:
+            lines = []
+            for seg in segments:
+                start = seg.get("start", 0.0)
+                end = seg.get("end", 0.0)
+                seg_text = seg.get("text", "").strip()
+                lines.append(f"[{start:07.2f} -> {end:07.2f}] {seg_text}")
+            text_out = "\n".join(lines)
+        else:
+            text_out = text
+
+        progress(0.95, desc="Guardando...")
+        txt_path = STTService.save_text(text_out)
+
+        gr.Info(f"Transcripción completada ({len(text)} caracteres)")
+        progress(1.0, desc="Finalizado")
+        return text_out, gr.update(value=txt_path, visible=True)
+
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        raise gr.Error(f"Error en la transcripción: {str(e)}")
+
 print("📦 VOCES_DIR =", VOCES_DIR)
 
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
@@ -181,32 +242,34 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                 guidance = gr.Slider(1.0, 5.0, value=2.0, label="Guidance")
                 duration = gr.Slider(10.0, 60.0, value=60.0, label="Seconds")
 
-            run_btn = gr.Button("SYNC VIDEO", variant="primary")
-
             with gr.Row():
                 with gr.Column():   
                     v_input = gr.Video(label="Sube tu Video", height=400)
                 with gr.Column():
                     v_output = gr.Video(label="Resultado Final", height=400)
 
-            gr.Audio(
+            lipsync_audio_input = gr.Audio(
                 label="🎧 Audio (sube uno o genera con TTS)",
                 type="filepath"
             )
+
+            run_btn = gr.Button("SYNC VIDEO", variant="primary")
 
         with gr.TabItem("🎙️ TTS"):
             gr.Markdown("### Generador de Voz")
 
             tts_text = gr.Textbox(label="Texto", lines=4)
-            voice_select = gr.Dropdown(
-                label="Voz",
-                choices=list_local_voices(),
-                value="Sohee"
-            )
+            with gr.Row():
+                voice_select = gr.Dropdown(
+                    label="Voz",
+                    choices=list_local_voices(),
+                    value="Sohee"
+                )
+                refresh_voices_btn = gr.Button("🔄", size="sm")
             ref_text_input = gr.Textbox(label="Texto Ref (opcional)")
             tts_btn = gr.Button("GENERAR AUDIO", variant="primary")
 
-            audio_main = gr.Audio(
+            tts_audio_output = gr.Audio(
                 label="🎧 Audio Generado",
                 type="filepath"
             )
@@ -243,11 +306,60 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                     mejora_video_output = gr.Video(label="Video Mejorado", height=400)
 
             iniciar_mejora_btn = gr.Button("🚀 Iniciar Mejora", variant="primary")
+
+        with gr.TabItem("📝 Audio a Texto"):
+            gr.Markdown("### Transcripción con Whisper")
+
+            with gr.Row():
+                with gr.Column():
+                    stt_audio_input = gr.Audio(
+                        label="🎧 Audio (sube o graba)",
+                        type="filepath"
+                    )
+                    stt_video_input = gr.Video(
+                        label="🎬 Video (extrae pista de audio)",
+                        height=300
+                    )
+                with gr.Column():
+                    stt_model = gr.Dropdown(
+                        choices=[
+                            "openai/whisper-tiny",
+                            "openai/whisper-base",
+                            "openai/whisper-small",
+                            "openai/whisper-medium",
+                            "openai/whisper-large-v3",
+                        ],
+                        value=DEFAULT_STT_MODEL,
+                        label="Modelo Whisper"
+                    )
+                    stt_language = gr.Dropdown(
+                        choices=["auto", "es", "en", "fr", "de", "it", "pt", "ja", "zh", "ko"],
+                        value="auto",
+                        label="Idioma"
+                    )
+                    stt_timestamps = gr.Checkbox(
+                        value=False,
+                        label="Incluir timestamps (segmentos con tiempos)"
+                    )
+                    stt_btn = gr.Button("TRANSCRIBIR", variant="primary")
+
+            stt_text_output = gr.Textbox(
+                label="📝 Texto transcrito",
+                lines=12,
+                show_copy_button=True
+            )
+            stt_file_output = gr.File(label="⬇️ Descargar .txt", visible=False)
    
     tts_btn.click(
         fn=process_tts,
         inputs=[tts_text, voice_select, ref_text_input],
-        outputs=[audio_main, audio_download]
+        outputs=[tts_audio_output, audio_download]
+    )
+
+    refresh_voices_btn.click(
+        fn=refresh_voices,
+        inputs=[],
+        outputs=[voice_select]
     )
 
     iniciar_mejora_btn.click(
@@ -262,7 +374,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
     run_btn.click(
         fn=process_sync,
-        inputs=[v_input, audio_main, steps, guidance, ckpt_select, config_select, duration],
+        inputs=[v_input, lipsync_audio_input, steps, guidance, ckpt_select, config_select, duration],
         outputs=v_output
     )
 
@@ -270,6 +382,12 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         fn=refresh_models,
         inputs=[],
         outputs=[ckpt_select, config_select]
+    )
+
+    stt_btn.click(
+        fn=process_stt,
+        inputs=[stt_audio_input, stt_video_input, stt_model, stt_language, stt_timestamps],
+        outputs=[stt_text_output, stt_file_output]
     )
 
 if __name__ == "__main__":

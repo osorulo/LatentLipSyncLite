@@ -371,19 +371,6 @@ class LipSyncService:
                 output_path
             ], check=True)
 
-            if upscale:
-                upscaled = output_path.replace(".mp4", "_up.mp4")
-                self.model._upscale(
-                    in_video=output_path,
-                    out_video=upscaled,
-                    audio_path=audio_path,
-                    progress=progress,
-                    base=done_units / total_units,
-                    span=1.0 / total_units
-                )
-                output_path = upscaled
-                tick("Mejorando rostro")
-
             if progress is not None:
                 progress(1.0, desc="Finalizado")
 

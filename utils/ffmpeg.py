@@ -29,3 +29,17 @@ def convert_to_25fps(input_video, output_video):
         ],
         check=True
     )
+
+def extract_audio(input_video, output_wav):
+    subprocess.run(
+        [
+            "ffmpeg", "-y",
+            "-i", input_video,
+            "-vn",
+            "-ac", "1",
+            "-ar", "16000",
+            "-acodec", "pcm_s16le",
+            output_wav
+        ],
+        check=True
+    )
