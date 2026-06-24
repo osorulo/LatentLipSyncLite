@@ -20,6 +20,9 @@ if args.colab:
     VOCES_DIR = os.path.join(BASE_VOZ, "voces")
     os.makedirs(VOCES_DIR, exist_ok=True)
 
+    from tts_service import TTSService
+    TTSService.VOCES_DIR = VOCES_DIR
+
 def list_local_voices():
     path = Path(VOCES_DIR)
     path.mkdir(exist_ok=True)
@@ -57,29 +60,30 @@ def get_video_path(video_input):
         return video_input.get("path")
     return video_input
 
-def mejora(video_file, upscale_factor, progress=gr.Progress()):
-    # Asumiendo que get_video_path y validate_file existen en tu utilidad
+def mejora(video_file, gfpgan_weight, upscale_factor, progress=gr.Progress()):
     video_path = get_video_path(video_file)
     if not video_path:
         raise gr.Error("No se proporcionó un video válido.")
 
+    if gfpgan_weight <= 0 and upscale_factor <= 0:
+        raise gr.Error("Activa al menos una opción de mejora (GFPGAN o Upscale)")
+
     run_id, run_dir, WORKDIR = create_run_dir()
     video_in = run_dir / "input.mp4"
-    # Aseguramos que video_out sea un string o Path compatible
     video_out = str(WORKDIR / f"{run_id}_up_output.mp4")
 
     try:
         progress(0.05, desc="Preparando archivos...")
         shutil.copy(video_path, video_in)
 
-        # Import local para evitar colisiones
         from mejorar import MejoraService
         service = MejoraService()
 
         service._upscale(
             in_video=video_in,
             out_video=video_out,
-            upscale_factor = upscale_factor,
+            gfpgan_weight=gfpgan_weight,
+            upscale_factor=upscale_factor,
             progress=progress
         )
     
@@ -87,7 +91,7 @@ def mejora(video_file, upscale_factor, progress=gr.Progress()):
 
     except Exception as e:
         import traceback
-        print(traceback.format_exc()) # Para debug en consola
+        print(traceback.format_exc())
         raise gr.Error(f"Error en el proceso: {str(e)}")
 
 def process_sync(
@@ -95,7 +99,6 @@ def process_sync(
     audio_file,
     steps,
     guidance,
-    mejorarES_chk,
     ckpt_dropdown,
     config_dropdown,
     duration = 60.0,
@@ -141,7 +144,6 @@ def process_sync(
             guidance=guidance,
             temp_dir=str(run_dir),
             progress=progress,
-            upscale=mejorarES_chk,
             ckpt=ckpt_dropdown,
             config=config_dropdown,
             duration = duration
@@ -156,13 +158,12 @@ def process_sync(
 print("📦 VOCES_DIR =", VOCES_DIR)
 
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
-    gr.Markdown("## 👄 LatentSync + TTS")
+    gr.Markdown("## 👄 LatentSyncLite")
 
-    with gr.Row():
-        with gr.Column():
-            gr.Markdown("### 🎬 Lipsync")
-           
-    
+    with gr.Tabs():
+        with gr.TabItem("🎬 LipSync"):
+            gr.Markdown("### Sincronización Labial")
+            
             with gr.Accordion("Configuración de Modelos", open=False):
                 with gr.Row():
                     ckpt_select = gr.Dropdown(
@@ -179,35 +180,24 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                 steps = gr.Slider(10, 50, value=10, label="Steps")
                 guidance = gr.Slider(1.0, 5.0, value=2.0, label="Guidance")
                 duration = gr.Slider(10.0, 60.0, value=60.0, label="Seconds")
-                mejorarES_chk = gr.Checkbox(
-                    label="Mejorar",
-                    value=False,
-                    visible=True
-                )
-            run_btn = gr.Button("SYNC VIDEO", variant="primary")
 
-            with gr.Accordion("Configuración de Mejora", open=False, visible=False):
-                with gr.Row():
-                    with gr.Column():  
-                        upscale_factor = gr.Slider(
-                            minimum=0, 
-                            maximum=2, 
-                            step=1, 
-                            value=1, 
-                            label="Factor de Escalado (1x = Calidad, 2x = Resolución)"
-                        )
-                        
-                        mejora_btn = gr.Button("Mejorar Calidad de video", variant="primary")
+            run_btn = gr.Button("SYNC VIDEO", variant="primary")
 
             with gr.Row():
                 with gr.Column():   
-                    v_input = gr.Video(label="Sube tu Video", height=500)
+                    v_input = gr.Video(label="Sube tu Video", height=400)
                 with gr.Column():
-                    v_output = gr.Video(label="Resultado Final", height=500)
-           
-        with gr.Column():
-            gr.Markdown("### 🎙️ Generador de Voz (TTS)")
-            tts_text = gr.Textbox(label="Texto", lines=3)
+                    v_output = gr.Video(label="Resultado Final", height=400)
+
+            gr.Audio(
+                label="🎧 Audio (sube uno o genera con TTS)",
+                type="filepath"
+            )
+
+        with gr.TabItem("🎙️ TTS"):
+            gr.Markdown("### Generador de Voz")
+
+            tts_text = gr.Textbox(label="Texto", lines=4)
             voice_select = gr.Dropdown(
                 label="Voz",
                 choices=list_local_voices(),
@@ -217,11 +207,42 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             tts_btn = gr.Button("GENERAR AUDIO", variant="primary")
 
             audio_main = gr.Audio(
-                label="🎧 Audio (sube uno o genera con TTS)",
+                label="🎧 Audio Generado",
                 type="filepath"
             )
 
             audio_download = gr.File(label="⬇️ Descargar Audio", visible=False)
+
+        with gr.TabItem("✨ Mejorar"):
+            gr.Markdown("### Mejorar Video")
+
+            gr.Markdown("**GFPGAN** restaura y mejora la calidad del rostro detectado en el video.")
+            gfpgan_weight = gr.Slider(
+                minimum=0.0,
+                maximum=1.0,
+                step=0.1,
+                value=0.0,
+                label="GFPGAN (Restauración Facial)",
+                info="0 = Sin mejora facial, 1.0 = Mejora máxima"
+            )
+
+            gr.Markdown("**RealESRGAN** escala el video al doble de resolución (2x).")
+            upscale_factor = gr.Slider(
+                minimum=0,
+                maximum=2,
+                step=2,
+                value=0,
+                label="Upscale (Resolución 2x)",
+                info="0 = Sin upscale, 2 = Duplicar resolución"
+            )
+
+            with gr.Row():
+                with gr.Column():
+                    mejora_video_input = gr.Video(label="Sube tu Video para Mejorar", height=400)
+                with gr.Column():
+                    mejora_video_output = gr.Video(label="Video Mejorado", height=400)
+
+            iniciar_mejora_btn = gr.Button("🚀 Iniciar Mejora", variant="primary")
    
     tts_btn.click(
         fn=process_tts,
@@ -229,11 +250,11 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         outputs=[audio_main, audio_download]
     )
 
-    mejora_btn.click(
+    iniciar_mejora_btn.click(
         fn=mejora, 
-        inputs=[v_input, upscale_factor],
-        outputs=[v_output]
-        )
+        inputs=[mejora_video_input, gfpgan_weight, upscale_factor],
+        outputs=[mejora_video_output]
+    )
 
     def validate_audio(audio):
         if not audio:
@@ -241,7 +262,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
     run_btn.click(
         fn=process_sync,
-        inputs=[v_input, audio_main, steps, guidance, mejorarES_chk, ckpt_select, config_select, duration],
+        inputs=[v_input, audio_main, steps, guidance, ckpt_select, config_select, duration],
         outputs=v_output
     )
 

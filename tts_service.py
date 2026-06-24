@@ -6,13 +6,15 @@ from transformers import pipeline
 from qwen_tts import Qwen3TTSModel
 import uuid
 
+VOCES_DIR = "voces"
+
 class TTSService:
     _instance = None
 
     def __init__(self):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.dtype = torch.bfloat16 if self.device == "cuda" else torch.float32
-        self.current_model_type = None # 'base' o 'custom'
+        self.current_model_type = None
         self.model = None
         self.whisper = None
         self.predefined_voices = ["Vivian", "Serena", "Uncle_Fu", "Dylan", "Eric", "Ryan", "Aiden", "Ono_Anna", "Sohee"]
@@ -45,7 +47,7 @@ class TTSService:
             repo,
             device_map="auto",
             dtype=self.dtype,
-            attn_implementation="eager" # Seguro para AMD y T4
+            attn_implementation="eager"
         )
         self.current_model_type = mode
 
@@ -69,7 +71,7 @@ class TTSService:
                     instruct="Natural"
                 )
             else:
-                audio_path = f"voces/{voice_name}" if not ref_audio else ref_audio
+                audio_path = os.path.join(VOCES_DIR, voice_name) if not ref_audio else ref_audio
 
                 if not ref_text:
                     asr = self.get_whisper()
@@ -86,9 +88,6 @@ class TTSService:
                     voice_clone_prompt=prompt
                 )
 
-        # -----------------------------
-        # Guardar WAV único
-        # -----------------------------
         os.makedirs("temp", exist_ok=True)
         output_path = os.path.abspath(
             f"temp/tts_{uuid.uuid4().hex}.wav"

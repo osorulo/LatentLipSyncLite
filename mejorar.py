@@ -15,36 +15,39 @@ class MejoraService:
         self.face_net = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    def _upscale(self, in_video, out_video, base=0.1, span=0.9, upscale_factor=1, progress=None):
-        # 1. Inicialización de modelos
+    def _upscale(self, in_video, out_video, base=0.1, span=0.9, gfpgan_weight=0.0, upscale_factor=0, progress=None):
+        needs_gfpgan = gfpgan_weight > 0
+        needs_upscale = upscale_factor > 0
+
+        if not needs_gfpgan and not needs_upscale:
+            raise ValueError("Debes activar al menos una opción de mejora (GFPGAN o Upscale)")
+
         if self.restorer2 is None:
             if progress is not None: progress(base, desc="Cargando modelos de IA...")
             
-            # RealESRGAN para fondo y resolución general
-            model_esrgan = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
-            self.restorer = RealESRGANer(
-                scale=2, 
-                model_path="checkpoints/RealESRGAN_x2plus.pth",
-                model=model_esrgan, 
-                half=(self.device == 'cuda'), 
-                device=self.device
-            )
+            if needs_upscale:
+                model_esrgan = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
+                self.restorer = RealESRGANer(
+                    scale=2, 
+                    model_path="checkpoints/RealESRGAN_x2plus.pth",
+                    model=model_esrgan, 
+                    half=(self.device == 'cuda'), 
+                    device=self.device
+                )
             
-            # GFPGAN para restauración facial
-            self.restorer2 = GFPGANer(
-                model_path="checkpoints/GFPGANv1.4.pth",
-                upscale=1, 
-                arch="clean", 
-                channel_multiplier=2, 
-                device=self.device
-            )
+            if needs_gfpgan:
+                self.restorer2 = GFPGANer(
+                    model_path="checkpoints/GFPGANv1.4.pth",
+                    upscale=1, 
+                    arch="clean", 
+                    channel_multiplier=2, 
+                    device=self.device
+                )
 
-            # Detector de rostros
-            proto = "checkpoints/deploy.prototxt"
-            model_ssd = "checkpoints/res10_300x300_ssd_iter_140000.caffemodel"
-            self.face_net = cv2.dnn.readNetFromCaffe(proto, model_ssd)
+                proto = "checkpoints/deploy.prototxt"
+                model_ssd = "checkpoints/res10_300x300_ssd_iter_140000.caffemodel"
+                self.face_net = cv2.dnn.readNetFromCaffe(proto, model_ssd)
 
-        # 2. Configuración de Video
         video_input_str = str(in_video)
         cap = cv2.VideoCapture(video_input_str)
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -57,17 +60,13 @@ class MejoraService:
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         
-        # IMPORTANTE: Definir el tamaño de salida (Original x 2)
-        actual_scale = upscale_factor if upscale_factor > 0 else 1
-        output_width = width * actual_scale
-        output_height = height * actual_scale
+        output_width = width * upscale_factor if upscale_factor > 0 else width
+        output_height = height * upscale_factor if upscale_factor > 0 else height
 
-        # Archivo temporal para video mudo
         temp_no_audio = str(out_video).replace(".mp4", "_temp_no_audio.mp4")
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         out = cv2.VideoWriter(temp_no_audio, fourcc, fps, (output_width, output_height))
 
-        # 3. Preparación de Máscara para el rostro
         target_size = 512
         center = (target_size // 2, target_size // 2)
         mask = np.zeros((target_size, target_size, 3), dtype=np.float32)
@@ -81,14 +80,12 @@ class MejoraService:
         face_box = None
         current_frame = 0
 
-        # 4. Bucle de Procesamiento
         try:
             while True:
                 ret, frame = cap.read()
                 if not ret: break
 
-                # Detección de rostro
-                if face_box is None:
+                if needs_gfpgan and face_box is None:
                     blob = cv2.dnn.blobFromImage(frame, 1.0, (300, 300), (104.0, 177.0, 123.0))
                     self.face_net.setInput(blob)
                     detections = self.face_net.forward()
@@ -98,28 +95,23 @@ class MejoraService:
                             face_box = box.astype(int)
                             break
 
-                # Mejora Facial
-                if face_box is not None:
+                if needs_gfpgan and face_box is not None:
                     x1, y1, x2, y2 = [max(0, coord) for coord in face_box]
                     roi = frame[y1:y2, x1:x2]
                     if roi.size > 0:
                         roi_h, roi_w = roi.shape[:2]
                         roi_input = cv2.resize(roi, (target_size, target_size), interpolation=cv2.INTER_LANCZOS4)
-                        _, _, enhanced = self.restorer2.enhance(roi_input, weight=0.25)
+                        _, _, enhanced = self.restorer2.enhance(roi_input, weight=gfpgan_weight)
                         merged = (enhanced.astype(np.float32) * cached_mask + roi_input.astype(np.float32) * inv_mask)
                         final_roi = cv2.resize(merged, (roi_w, roi_h), interpolation=cv2.INTER_LINEAR)
                         frame[y1:y2, x1:x2] = final_roi.astype(np.uint8)
 
-                
-                if upscale_factor > 0:
-                    # Aplica RealESRGAN a todo el frame (lento)
+                if needs_upscale:
                     up, _ = self.restorer.enhance(frame, outscale=upscale_factor)
                 else:
-                    # Mantiene el frame original con la mejora de rostro ya aplicada (rápido)
                     up = frame
                 out.write(up)
 
-                # Reporte de progreso
                 if progress is not None and current_frame % 5 == 0:
                     self._report_progress(progress, base, span, current_frame / total_frames, f"Procesando: {current_frame}/{total_frames}")
                 
@@ -129,15 +121,10 @@ class MejoraService:
             cap.release()
             out.release()
 
-        # 5. Fusión Final de Audio con FFmpeg
         if progress is not None:
             progress(base + span, desc="Finalizando video con audio...")
 
         try:
-            # Comando optimizado:
-            # -c:v libx264 codifica a H264 (estándar compatible)
-            # -pix_fmt yuv420p asegura compatibilidad con navegadores/móviles
-            # -c:a aac copia o convierte el audio original a un formato estándar
             cmd = [
                 'ffmpeg', '-y',
                 '-i', temp_no_audio,
@@ -155,7 +142,6 @@ class MejoraService:
             
             if result.returncode != 0:
                 print(f"Error de FFmpeg: {result.stderr}")
-                # Si falla el audio, intentamos salvar el video procesado
                 os.rename(temp_no_audio, out_video)
             else:
                 if os.path.exists(temp_no_audio):

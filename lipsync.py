@@ -224,7 +224,6 @@ class LipSyncService:
         guidance: float,
         temp_dir: str,
         progress=None,
-        upscale: bool = False,
         ckpt=None,
         config=None,
         duration = 60.0
@@ -267,9 +266,6 @@ class LipSyncService:
             total_units += 1                  # whisper
             total_units += len(phrase_chunks) # lipsync frases
             total_units += 1                  # concat final
-            if upscale:
-                total_units += 1              # upscale
-
             self.load_model(ckpt, config)
             tick("Modelo cargado")
 
@@ -427,7 +423,6 @@ class LipSyncService:
         guidance: float,
         temp_dir: str,
         progress=None,
-        upscale: bool = False,
         ckpt=None, config=None
     ) -> str:
         
@@ -461,7 +456,7 @@ class LipSyncService:
             # ==================================================
 
             LIP_SYNC_START = 0.25
-            LIP_SYNC_END = 0.85 if upscale else 0.95
+            LIP_SYNC_END = 0.95
             UPScale_START = 0.85
 
             self.model.start_sync(
@@ -475,23 +470,6 @@ class LipSyncService:
                 base=LIP_SYNC_START,
                 span=(LIP_SYNC_END - LIP_SYNC_START)
             )
-
-            # ==================================================
-            # 2️⃣ Upscale opcional (rostro)
-            # ==================================================
-            if upscale:
-                upscaled_path = output_path.replace(".mp4", "_up.mp4")
-
-                self.model._upscale(
-                    in_video=output_path,
-                    out_video=upscaled_path,
-                    audio_path = audio_path,
-                    base=UPScale_START,
-                    span=0.15,
-                    progress=progress
-                )
-
-                output_path = upscaled_path
 
             # ==================================================
             # Limpieza GPU / RAM
