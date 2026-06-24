@@ -134,19 +134,19 @@ class LipSyncInference:
         in_video,
         out_video,
         audio_path,
-        base=0.85, 
-        span=0.15,
+        base=0.0, 
+        span=1,
         progress=None
     ):
         
         if(self.restorer == None):
-                 # ESRGAN para super-resolución
-                """model_esrgan = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
-                self.restorer = RealESRGANer(
+                # ESRGAN para super-resolución
+                #model_esrgan = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
+                """self.restorer = RealESRGANer(
                     scale=2, model_path="checkpoints/RealESRGAN_x2plus.pth",
                     model=model_esrgan, half=(self.device == 'cuda'), device=self.device
-                )"""
-
+                )
+"""
                  # GFPGAN para restauración facial
                 self.restorer2 = GFPGANer(
                     model_path="checkpoints/GFPGANv1.4.pth",
@@ -247,7 +247,7 @@ class LipSyncInference:
                    
                     with torch.amp.autocast(device_type="cuda"):
                         _, _, enhanced = self.restorer2.enhance(
-                            roi_resized, weight=0.5
+                            roi_resized, weight=0.3
                         )
 
                     merged = (
@@ -268,6 +268,8 @@ class LipSyncInference:
                     )"""
                     frame[y1:y2, x1:x2] = final_roi
 
+            #frame, _ = self.restorer.enhance(roi, outscale=2)
+            
             out.write(frame)
 
             if progress is not None and i % 5 == 0:
@@ -288,7 +290,8 @@ class LipSyncInference:
             if progress is not None:
                 self._report_progress(progress, base=base + (span * 0.9), span=span * 0.1, value=1.0, desc="Finalizando...")
             
-            self._merge_audio_video(audio_path, temp_video_path, out_video)
+            if audio_path is not None:
+                self._merge_audio_video(audio_path, temp_video_path, out_video)
             
             if os.path.exists(temp_video_path):
                 os.remove(temp_video_path)

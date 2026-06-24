@@ -397,6 +397,25 @@ class LipSyncService:
 
         except Exception as e:
             raise RuntimeError(f"❌ Error en sync por frases: {e}")
+        
+    def Mejorar(self, output_path, audio_path=None, progress=None):
+
+        if progress is not None:
+            progress(0.15, desc="Analizando FPS")
+
+        upscaled = output_path.replace(".mp4", "_up.mp4")
+        from mejorar import MejoraService
+
+        mejora = MejoraService()
+
+        upscaled = mejora._upscale(
+            in_video=output_path,
+            out_video=upscaled,
+            audio_path=audio_path,
+            progress=progress
+        )
+        output_path = upscaled
+        return output_path
 
 
     def sync_original(
