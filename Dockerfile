@@ -6,16 +6,19 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     MPLBACKEND=Agg
 
-# Sistema: Python 3.10, ffmpeg, libs GUI, rclone
+# Sistema: Python 3.10, ffmpeg, libs GUI
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3.10 python3.10-dev python3.10-distutils libpython3.10-dev \
-        curl git ffmpeg unzip rclone \
+        curl git ffmpeg unzip \
         build-essential g++ \
         libglib2.0-0 libsm6 libxext6 libxrender1 libgl1 libgomp1 ca-certificates \
     && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.10 \
     && ln -sf /usr/bin/python3.10 /usr/bin/python3 \
     && ln -sf /usr/bin/python3 /usr/bin/python \
     && rm -rf /var/lib/apt/lists/*
+
+# Instalar rclone desde oficial (version actualizada)
+RUN curl https://rclone.org/install.sh | bash
 
 WORKDIR /app
 

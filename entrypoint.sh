@@ -24,7 +24,7 @@ if [ -n "$R2_ACCESS_KEY_ID" ] && [ -n "$R2_BUCKET" ]; then
     mkdir -p "$CHECKPOINTS_DIR" "$VOCES_DIR"
     echo "--- Descargando checkpoints desde R2 (puede tardar 2-5 min) ---"
     rclone copy "r2:${R2_BUCKET}/checkpoints/" "$CHECKPOINTS_DIR/" \
-        --transfers 8 --s3-concurrency 8 --progress \
+        --transfers 8 --progress \
         || echo "WARN: no se pudo descargar checkpoints."
     echo "--- Descargando voces desde R2 ---"
     rclone copy "r2:${R2_BUCKET}/voces/" "$VOCES_DIR/" \
