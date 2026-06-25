@@ -2,7 +2,10 @@ import torch
 import soundfile as sf
 import os
 import sys
+from pathlib import Path
 from transformers import pipeline
+
+from utils.paths import VOCES_DIR
 
 try:
     from qwen_tts import Qwen3TTSModel
@@ -40,7 +43,7 @@ def get_ref_text(audio_path):
     return result["text"]
 
 # Uso en tu script:
-ref_audio_path = "voces/Raul.wav"
+ref_audio_path = str(VOCES_DIR / "Raul.wav")
 ref_audio_text = get_ref_text(ref_audio_path)
 print(f"Texto detectado: {ref_audio_text}")
 

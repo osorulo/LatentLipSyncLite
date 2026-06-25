@@ -10,12 +10,15 @@ from pathlib import Path
 class Audio2Feature:
     def __init__(
         self,
-        model_path="checkpoints/whisper/tiny.pt",
+        model_path=None,
         device=None,
         audio_embeds_cache_dir=None,
         num_frames=16,
         audio_feat_length=[2, 2],
     ):
+        if model_path is None:
+            from utils.paths import CHECKPOINTS_DIR
+            model_path = str(CHECKPOINTS_DIR / "whisper" / "tiny.pt")
         self.model = load_model(model_path, device)
         self.audio_embeds_cache_dir = audio_embeds_cache_dir
         if audio_embeds_cache_dir is not None and audio_embeds_cache_dir != "":
@@ -149,7 +152,7 @@ class Audio2Feature:
 
 
 if __name__ == "__main__":
-    audio_encoder = Audio2Feature(model_path="checkpoints/whisper/tiny.pt")
+    audio_encoder = Audio2Feature()
     audio_path = "assets/demo1_audio.wav"
     array = audio_encoder.audio2feat(audio_path)
     print(array.shape)

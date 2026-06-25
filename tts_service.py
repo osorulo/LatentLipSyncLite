@@ -7,10 +7,7 @@ from transformers import pipeline
 from qwen_tts import Qwen3TTSModel
 import uuid
 
-import tts_service as _tts_module
-_tts_module.VOCES_DIR = "voces"
-
-VOCES_DIR = _tts_module.VOCES_DIR
+from utils.paths import VOCES_DIR
 
 class TTSService:
     _instance = None
@@ -67,7 +64,7 @@ class TTSService:
         mode = "custom" if is_custom else "base"
         self.load_model(mode)
 
-        voces_dir = _tts_module.VOCES_DIR
+        voces_dir = str(VOCES_DIR)
 
         with torch.no_grad():
             if is_custom:

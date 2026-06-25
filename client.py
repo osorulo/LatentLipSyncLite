@@ -19,6 +19,8 @@ from realesrgan import RealESRGANer
 from basicsr.archs.rrdbnet_arch import RRDBNet
 from gfpgan import GFPGANer
 
+from utils.paths import CHECKPOINTS_DIR, CONFIGS_DIR
+
 class LipSyncInference:
     @classmethod
     def get(cls):
@@ -46,12 +48,12 @@ class LipSyncInference:
 
             self.config = OmegaConf.load(unet_config_path)
             
-            scheduler = DDIMScheduler.from_pretrained("configs")
+            scheduler = DDIMScheduler.from_pretrained(str(CONFIGS_DIR))
 
             if self.config.model.cross_attention_dim == 768:
-                whisper_model_path = "checkpoints/whisper/small.pt"
+                whisper_model_path = str(CHECKPOINTS_DIR / "whisper" / "small.pt")
             elif self.config.model.cross_attention_dim == 384:
-                whisper_model_path = "checkpoints/whisper/tiny.pt"
+                whisper_model_path = str(CHECKPOINTS_DIR / "whisper" / "tiny.pt")
             else:
                 raise NotImplementedError("cross_attention_dim must be 768 or 384")
             
@@ -125,7 +127,7 @@ class LipSyncInference:
         )
 
     def whisper_transcribe(self, audio_path: str):
-        self.model_whisper = load_model("checkpoints/whisper/tiny.pt", self.device)
+        self.model_whisper = load_model(str(CHECKPOINTS_DIR / "whisper" / "tiny.pt"), self.device)
         result = self.model_whisper.transcribe_t(audio_path, language="es")
         return result["segments"]
     
@@ -143,18 +145,18 @@ class LipSyncInference:
                 # ESRGAN para super-resolución
                 #model_esrgan = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
                 """self.restorer = RealESRGANer(
-                    scale=2, model_path="checkpoints/RealESRGAN_x2plus.pth",
+                    scale=2, model_path=str(CHECKPOINTS_DIR / "RealESRGAN_x2plus.pth"),
                     model=model_esrgan, half=(self.device == 'cuda'), device=self.device
                 )
 """
                  # GFPGAN para restauración facial
                 self.restorer2 = GFPGANer(
-                    model_path="checkpoints/GFPGANv1.4.pth",
+                    model_path=str(CHECKPOINTS_DIR / "GFPGANv1.4.pth"),
                     upscale=1, arch="clean", channel_multiplier=2, device=self.device
                 )
 
-                proto = "checkpoints/deploy.prototxt"
-                model_ssd = "checkpoints/res10_300x300_ssd_iter_140000.caffemodel"
+                proto = str(CHECKPOINTS_DIR / "deploy.prototxt")
+                model_ssd = str(CHECKPOINTS_DIR / "res10_300x300_ssd_iter_140000.caffemodel")
                 self.face_net = cv2.dnn.readNetFromCaffe(proto, model_ssd)
 
         cap = cv2.VideoCapture(in_video)

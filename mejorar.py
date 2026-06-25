@@ -8,6 +8,8 @@ from realesrgan import RealESRGANer
 from basicsr.archs.rrdbnet_arch import RRDBNet
 from gfpgan import GFPGANer
 
+from utils.paths import CHECKPOINTS_DIR
+
 class MejoraService:
     def __init__(self):
         self.restorer = None
@@ -28,24 +30,24 @@ class MejoraService:
             if needs_upscale:
                 model_esrgan = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=2)
                 self.restorer = RealESRGANer(
-                    scale=2, 
-                    model_path="checkpoints/RealESRGAN_x2plus.pth",
-                    model=model_esrgan, 
-                    half=(self.device == 'cuda'), 
-                    device=self.device
-                )
-            
-            if needs_gfpgan:
-                self.restorer2 = GFPGANer(
-                    model_path="checkpoints/GFPGANv1.4.pth",
-                    upscale=1, 
-                    arch="clean", 
-                    channel_multiplier=2, 
+                    scale=2,
+                    model_path=str(CHECKPOINTS_DIR / "RealESRGAN_x2plus.pth"),
+                    model=model_esrgan,
+                    half=(self.device == 'cuda'),
                     device=self.device
                 )
 
-                proto = "checkpoints/deploy.prototxt"
-                model_ssd = "checkpoints/res10_300x300_ssd_iter_140000.caffemodel"
+            if needs_gfpgan:
+                self.restorer2 = GFPGANer(
+                    model_path=str(CHECKPOINTS_DIR / "GFPGANv1.4.pth"),
+                    upscale=1,
+                    arch="clean",
+                    channel_multiplier=2,
+                    device=self.device
+                )
+
+                proto = str(CHECKPOINTS_DIR / "deploy.prototxt")
+                model_ssd = str(CHECKPOINTS_DIR / "res10_300x300_ssd_iter_140000.caffemodel")
                 self.face_net = cv2.dnn.readNetFromCaffe(proto, model_ssd)
 
         video_input_str = str(in_video)

@@ -1,29 +1,34 @@
 import gradio as gr
 import shutil
+import argparse
+import sys
+import os
 from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--colab", action="store_true", help="Usar Google Drive para cache persistente")
+parser.add_argument("--host", default=os.environ.get("GRADIO_SERVER_NAME", "127.0.0.1"),
+                    help="Host para Gradio (default: 127.0.0.1, env GRADIO_SERVER_NAME)")
+parser.add_argument("--port", type=int,
+                    default=int(os.environ.get("GRADIO_SERVER_PORT", "7860")),
+                    help="Puerto para Gradio (default: 7860, env GRADIO_SERVER_PORT)")
+parser.add_argument("--share", action="store_true",
+                    default=os.environ.get("GRADIO_SHARE", "0") == "1",
+                    help="Generar link publico de Gradio (env GRADIO_SHARE=1)")
+args, _ = parser.parse_known_args()
+sys.argv = sys.argv[:1]
+
+if args.colab:
+    BASE_VOZ = "/content/drive/MyDrive/LatentLipSyncLite"
+    os.environ["VOCES_DIR"] = os.path.join(BASE_VOZ, "voces")
+    os.makedirs(os.environ["VOCES_DIR"], exist_ok=True)
 
 from stt_service import STTService, DEFAULT_MODEL as DEFAULT_STT_MODEL
 from utils.files import create_run_dir
 from utils.validation import validate_file
 from utils.ffmpeg import extract_audio
+from utils.paths import VOCES_DIR, CHECKPOINTS_DIR, CONFIGS_DIR
 from lipsync import LipSyncService
-import argparse
-import sys
-import os
-
-parser = argparse.ArgumentParser()
-parser.add_argument("--colab", action="store_true", help="Usar Google Drive para cache persistente")
-args, _ = parser.parse_known_args()
-sys.argv = sys.argv[:1]
-VOCES_DIR = "voces"
-
-if args.colab:
-    BASE_VOZ = "/content/drive/MyDrive/LatentLipSyncLite"
-    VOCES_DIR = os.path.join(BASE_VOZ, "voces")
-    os.makedirs(VOCES_DIR, exist_ok=True)
-
-    import tts_service
-    tts_service.VOCES_DIR = VOCES_DIR
 
 def list_local_voices():
     path = Path(VOCES_DIR)
@@ -44,16 +49,16 @@ def process_tts(text, voice, ref_text):
     return out_path, gr.update(value=out_path, visible=True)
 
 def list_checkpoints():
-    paths = list(Path("checkpoints").glob("*.pt"))
+    paths = list(CHECKPOINTS_DIR.glob("*.pt"))
     return [str(p) for p in paths]
 
 def list_configs():
-    paths = list(Path("configs/unet").glob("*.yaml"))
+    paths = list((CONFIGS_DIR / "unet").glob("*.yaml"))
     return [str(p) for p in paths]
 
 def get_model_choices():
-    checkpoints = [str(p) for p in Path("checkpoints").glob("*.pt")]
-    configs = [str(p) for p in Path("configs/unet").glob("*.yaml")]
+    checkpoints = [str(p) for p in CHECKPOINTS_DIR.glob("*.pt")]
+    configs = [str(p) for p in (CONFIGS_DIR / "unet").glob("*.yaml")]
     return checkpoints, configs
 
 def refresh_models():
@@ -391,4 +396,8 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch(share=True)
+    demo.launch(
+        server_name=args.host,
+        server_port=args.port,
+        share=args.share
+    )

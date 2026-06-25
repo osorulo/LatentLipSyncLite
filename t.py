@@ -3,6 +3,8 @@ import numpy as np
 import torch
 from insightface.app import FaceAnalysis
 
+from utils.paths import CHECKPOINTS_DIR
+
 # --- Tu Clase Detectora (con correcciones menores para que sea funcional) ---
 INSIGHTFACE_DETECT_SIZE = 512
 LMK_ADAPT_ORIGIN_ORDER = [1, 10, 12, 14, 16, 3, 5, 7, 0, 23, 21, 19, 32, 30, 28, 26, 17, 43, 48, 49, 51, 50, 102, 103, 104, 105, 101, 73, 74, 86]
@@ -17,7 +19,7 @@ class FaceDetector:
         # Asegúrate de tener los modelos en 'checkpoints/auxiliary'
         self.app = FaceAnalysis(
             allowed_modules=["detection", "landmark_2d_106"],
-            root="checkpoints/auxiliary",
+            root=str(CHECKPOINTS_DIR / "auxiliary"),
             providers=["CUDAExecutionProvider" if torch.cuda.is_available() else "CPUExecutionProvider"],
         )
         ctx = cuda_to_int(device) if torch.cuda.is_available() else -1

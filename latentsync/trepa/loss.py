@@ -23,9 +23,12 @@ class TREPALoss:
     def __init__(
         self,
         device="cuda",
-        ckpt_path="checkpoints/auxiliary/vit_g_hybrid_pt_1200e_ssv2_ft.pth",
+        ckpt_path=None,
         with_cp=False,
     ):
+        if ckpt_path is None:
+            from utils.paths import CHECKPOINTS_DIR
+            ckpt_path = str(CHECKPOINTS_DIR / "auxiliary" / "vit_g_hybrid_pt_1200e_ssv2_ft.pth")
         check_model_and_download(ckpt_path)
         self.model = load_videomae_model(device, ckpt_path, with_cp).eval().to(dtype=torch.float16)
         self.model.requires_grad_(False)
