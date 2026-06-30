@@ -23,12 +23,27 @@ if args.colab:
     os.environ["VOCES_DIR"] = os.path.join(BASE_VOZ, "voces")
     os.makedirs(os.environ["VOCES_DIR"], exist_ok=True)
 
+import torch
+import gc
+
 from stt_service import STTService, DEFAULT_MODEL as DEFAULT_STT_MODEL
 from utils.files import create_run_dir
 from utils.validation import validate_file
 from utils.ffmpeg import extract_audio
 from utils.paths import VOCES_DIR, CHECKPOINTS_DIR, CONFIGS_DIR
 from lipsync import LipSyncService
+
+
+def cleanup_models():
+    LipSyncService.unload()
+    STTService.unload()
+    from tts_service import TTSService
+    TTSService.unload()
+    from mejorar import MejoraService
+    MejoraService.unload()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 def list_local_voices():
     path = Path(VOCES_DIR)
@@ -41,11 +56,27 @@ def refresh_voices():
     gr.Info("Voces actualizadas")
     return gr.Dropdown(choices=list_local_voices())
 
-def process_tts(text, voice, ref_text):
+EMOTIONS = [
+    ("Natural", "Natural"),
+    ("😊 Feliz", "Speak in a happy and cheerful tone"),
+    ("😢 Triste", "Speak in a sad and melancholic tone"),
+    ("😠 Enojado", "Speak in an angry and aggressive tone"),
+    ("😲 Sorprendido", "Speak in a surprised tone"),
+    ("🤔 Pensativo", "Speak in a thoughtful and pensive tone"),
+    ("🤫 Susurro", "Speak in a whisper"),
+    ("🥳 Emocionado", "Speak in an excited and enthusiastic tone"),
+    ("😴 Cansado", "Speak in a tired and sleepy tone"),
+    ("🎤 Formal", "Speak in a formal and professional tone"),
+    ("✏️ Personalizado", "CUSTOM"),
+]
+
+def process_tts(text, voice, ref_text, emotion, custom_instruct):
+    cleanup_models()
     from tts_service import TTSService
     if not text: raise gr.Error("Escribe un texto")
+    instruct = custom_instruct if emotion == "CUSTOM" else emotion
     service = TTSService.get()
-    out_path, detected_text = service.generate(text, voice, ref_text=ref_text)
+    out_path, detected_text = service.generate(text, voice, ref_text=ref_text, instruct=instruct)
     return out_path, gr.update(value=out_path, visible=True)
 
 def list_checkpoints():
@@ -66,12 +97,26 @@ def refresh_models():
     gr.Info("Listado de modelos actualizado")
     return gr.Dropdown(choices=ckpts), gr.Dropdown(choices=cfgs)
 
+def suggest_config(checkpoint_path):
+    if not checkpoint_path:
+        return gr.Dropdown(value=None)
+    ckpt_name = Path(checkpoint_path).name.lower()
+    configs = list((CONFIGS_DIR / "unet").glob("*.yaml"))
+    for c in configs:
+        if "stage2_512" in c.name and "efficient" not in c.name and "v16" not in c.name:
+            return gr.Dropdown(value=str(c))
+    for c in configs:
+        if "stage2" in c.name and "efficient" not in c.name:
+            return gr.Dropdown(value=str(c))
+    return gr.Dropdown()
+
 def get_video_path(video_input):
     if isinstance(video_input, dict):
         return video_input.get("path")
     return video_input
 
 def mejora(video_file, gfpgan_weight, upscale_factor, progress=gr.Progress()):
+    cleanup_models()
     video_path = get_video_path(video_file)
     if not video_path:
         raise gr.Error("No se proporcionó un video válido.")
@@ -112,9 +157,10 @@ def process_sync(
     guidance,
     ckpt_dropdown,
     config_dropdown,
-    duration = 60.0,
+    duration=60.0,
     progress=gr.Progress()
 ):
+    cleanup_models()
     video_path = get_video_path(video_file)
     audio_path = audio_file  
 
@@ -157,7 +203,7 @@ def process_sync(
             progress=progress,
             ckpt=ckpt_dropdown,
             config=config_dropdown,
-            duration = duration
+            duration=duration
         )
 
         progress(1.0, desc="Finalizado")
@@ -166,7 +212,8 @@ def process_sync(
     except Exception as e:
         raise gr.Error(f"Error: {e}")
 
-def process_stt(audio_input, video_input, model_name, language, timestamps, progress=gr.Progress()):
+def process_stt(audio_input, video_input, model_name, language, timestamps, subtitles, progress=gr.Progress()):
+    cleanup_models()
     audio_path = audio_input
     video_path = get_video_path(video_input)
 
@@ -211,10 +258,15 @@ def process_stt(audio_input, video_input, model_name, language, timestamps, prog
 
         progress(0.95, desc="Guardando...")
         txt_path = STTService.save_text(text_out)
+        srt_path = None
+        if subtitles and timestamps and segments:
+            srt_path = STTService.save_srt(segments)
+            gr.Info(f"Transcripción + subtítulos completada ({len(text)} caracteres)")
+        else:
+            gr.Info(f"Transcripción completada ({len(text)} caracteres)")
 
-        gr.Info(f"Transcripción completada ({len(text)} caracteres)")
         progress(1.0, desc="Finalizado")
-        return text_out, gr.update(value=txt_path, visible=True)
+        return text_out, gr.update(value=txt_path, visible=True), gr.update(value=srt_path, visible=srt_path is not None)
 
     except Exception as e:
         import traceback
@@ -243,9 +295,11 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                     refresh_btn = gr.Button("🔄")
 
             with gr.Row():
-                steps = gr.Slider(10, 50, value=10, label="Steps")
-                guidance = gr.Slider(1.0, 5.0, value=2.0, label="Guidance")
+                steps = gr.Slider(10, 50, value=20, label="Steps", info="Más = mejor sync, más lento")
+                guidance = gr.Slider(1.0, 3.0, value=1.5, label="Guidance", info="Más = sync más fuerte, puede saturar")
                 duration = gr.Slider(10.0, 60.0, value=60.0, label="Seconds")
+
+
 
             with gr.Row():
                 with gr.Column():   
@@ -271,6 +325,18 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                     value="Sohee"
                 )
                 refresh_voices_btn = gr.Button("🔄", size="sm")
+            with gr.Row():
+                emotion_select = gr.Dropdown(
+                    label="Emoción / Estilo",
+                    choices=[e[0] for e in EMOTIONS],
+                    value="Natural"
+                )
+                custom_instruct = gr.Textbox(
+                    label="Instrucción personalizada",
+                    placeholder="Ej: habla muy rápido y emocionado",
+                    visible=False,
+                    scale=2
+                )
             ref_text_input = gr.Textbox(label="Texto Ref (opcional)")
             tts_btn = gr.Button("GENERAR AUDIO", variant="primary")
 
@@ -346,6 +412,10 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                         value=False,
                         label="Incluir timestamps (segmentos con tiempos)"
                     )
+                    stt_subtitles = gr.Checkbox(
+                        value=True,
+                        label="Generar .SRT (subtítulos)"
+                    )
                     stt_btn = gr.Button("TRANSCRIBIR", variant="primary")
 
             stt_text_output = gr.Textbox(
@@ -353,11 +423,22 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                 lines=12,
                 show_copy_button=True
             )
-            stt_file_output = gr.File(label="⬇️ Descargar .txt", visible=False)
+            with gr.Row():
+                stt_file_output = gr.File(label="⬇️ Descargar .txt", visible=False)
+                stt_srt_output = gr.File(label="⬇️ Descargar .srt", visible=False)
    
+    def toggle_custom_instruct(choice):
+        return gr.update(visible=choice == "✏️ Personalizado")
+
+    emotion_select.change(
+        fn=toggle_custom_instruct,
+        inputs=[emotion_select],
+        outputs=[custom_instruct]
+    )
+
     tts_btn.click(
         fn=process_tts,
-        inputs=[tts_text, voice_select, ref_text_input],
+        inputs=[tts_text, voice_select, ref_text_input, emotion_select, custom_instruct],
         outputs=[tts_audio_output, audio_download]
     )
 
@@ -389,10 +470,16 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         outputs=[ckpt_select, config_select]
     )
 
+    ckpt_select.change(
+        fn=suggest_config,
+        inputs=[ckpt_select],
+        outputs=[config_select]
+    )
+
     stt_btn.click(
         fn=process_stt,
-        inputs=[stt_audio_input, stt_video_input, stt_model, stt_language, stt_timestamps],
-        outputs=[stt_text_output, stt_file_output]
+        inputs=[stt_audio_input, stt_video_input, stt_model, stt_language, stt_timestamps, stt_subtitles],
+        outputs=[stt_text_output, stt_file_output, stt_srt_output]
     )
 
 if __name__ == "__main__":

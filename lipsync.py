@@ -16,6 +16,15 @@ class LipSyncService:
             cls._instance = cls()
         return cls._instance
 
+    @classmethod
+    def unload(cls):
+        if cls._instance is not None:
+            if cls._instance.model is not None:
+                del cls._instance.model
+                cls._instance.model = None
+            cls._instance.current_ckpt = None
+            cls._instance.current_config = None
+
     def __init__(self):
         self.model = None
         self.current_ckpt = None
@@ -35,7 +44,6 @@ class LipSyncService:
 
             self.model = LipSyncInference(
                 inference_ckpt_path=ckpt_path,
-                enable_deepcache=True,
                 unet_config_path=config_path,
                 seed=1247
             )
@@ -226,7 +234,7 @@ class LipSyncService:
         progress=None,
         ckpt=None,
         config=None,
-        duration = 60.0
+        duration=60.0
     ) -> str:
         video_path = os.path.abspath(video_path)
         audio_path = os.path.abspath(audio_path)
@@ -350,6 +358,9 @@ class LipSyncService:
             if not processed_videos:
                 raise RuntimeError("No se generaron segmentos sincronizados")
 
+            if progress is not None:
+                progress(1.0, desc="Finalizando...")
+
             xfade_video = os.path.join(temp_dir, "video_xfade.mp4")
 
             self.concat_with_xfade(
@@ -358,8 +369,6 @@ class LipSyncService:
                 fps=25,
                 fade_duration=0.05
             )
-
-            tick("Preparando resultado....")
 
             subprocess.run([
                 "ffmpeg", "-y",
@@ -370,9 +379,6 @@ class LipSyncService:
                 "-shortest",
                 output_path
             ], check=True)
-
-            if progress is not None:
-                progress(1.0, desc="Finalizado")
 
             shutil.rmtree(temp_dir)
 

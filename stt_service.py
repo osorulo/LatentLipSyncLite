@@ -22,6 +22,11 @@ class STTService:
             cls._instance = cls()
         return cls._instance
 
+    @classmethod
+    def unload(cls):
+        if cls._instance is not None:
+            cls._instance._unload_models()
+
     def _unload_models(self):
         self._pipeline = None
         self._current_model = None
@@ -76,4 +81,29 @@ class STTService:
         out_path = os.path.abspath(f"temp/stt_{uuid.uuid4().hex}.txt")
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(text)
+        return out_path
+
+    @staticmethod
+    def save_srt(segments, text_without_timestamps=None):
+        os.makedirs("temp", exist_ok=True)
+        out_path = os.path.abspath(f"temp/stt_{uuid.uuid4().hex}.srt")
+        lines = []
+        for i, seg in enumerate(segments, 1):
+            start = seg.get("start", 0.0)
+            end = seg.get("end", 0.0)
+            seg_text = seg.get("text", "").strip()
+
+            def fmt(secs):
+                h = int(secs // 3600)
+                m = int((secs % 3600) // 60)
+                s = int(secs % 60)
+                ms = int((secs - int(secs)) * 1000)
+                return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+            lines.append(str(i))
+            lines.append(f"{fmt(start)} --> {fmt(end)}")
+            lines.append(seg_text)
+            lines.append("")
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
         return out_path

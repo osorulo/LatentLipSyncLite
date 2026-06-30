@@ -363,6 +363,7 @@ class LipsyncPipeline(DiffusionPipeline):
 
         # 0. Define call parameters
         device = self._execution_device
+        self.enable_vae_slicing()
         mask_image = load_fixed_mask(height, mask_image_path)
         self.image_processor = ImageProcessor(height, device="cuda", mask_image=mask_image)
         self.set_progress_bar_config(desc=f"Sample frames: {num_frames}")
@@ -455,23 +456,31 @@ class LipsyncPipeline(DiffusionPipeline):
             with self.progress_bar(total=num_inference_steps) as progress_bar:
                 for j, t in enumerate(timesteps):
                     # expand the latents if we are doing classifier free guidance
-                    unet_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
+                    latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
 
-                    unet_input = self.scheduler.scale_model_input(unet_input, t)
+                    latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
                     # concat latents, mask, masked_image_latents in the channel dimension
-                    unet_input = torch.cat([unet_input, mask_latents, masked_image_latents, ref_latents], dim=1)
+                    unet_input = torch.cat([latent_model_input, mask_latents, masked_image_latents, ref_latents], dim=1)
+
+                    if do_classifier_free_guidance:
+                        del latent_model_input
 
                     # predict the noise residual
                     noise_pred = self.unet(unet_input, t, encoder_hidden_states=audio_embeds).sample
+
+                    del unet_input
 
                     # perform guidance
                     if do_classifier_free_guidance:
                         noise_pred_uncond, noise_pred_audio = noise_pred.chunk(2)
                         noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_audio - noise_pred_uncond)
+                        del noise_pred_uncond, noise_pred_audio
 
                     # compute the previous noisy sample x_t -> x_t-1
                     latents = self.scheduler.step(noise_pred, t, latents, **extra_step_kwargs).prev_sample
+
+                    del noise_pred
 
                     # call the callback, if provided
                     if j == len(timesteps) - 1 or ((j + 1) > num_warmup_steps and (j + 1) % self.scheduler.order == 0):
@@ -490,8 +499,6 @@ class LipsyncPipeline(DiffusionPipeline):
                         if callback is not None and j % callback_steps == 0:
                             callback(j, t, latents)
 
-                    
-
             # Recover the pixel values
             decoded_latents = self.decode_latents(latents)
             decoded_latents = self.paste_surrounding_pixels_back(
@@ -499,12 +506,21 @@ class LipsyncPipeline(DiffusionPipeline):
             )
             synced_video_frames.append(decoded_latents)
 
+            del latents, mask_latents, masked_image_latents, ref_latents, masks, ref_pixel_values
+            if do_classifier_free_guidance:
+                del audio_embeds
+            torch.cuda.empty_cache()
+
         video_gen = self.restore_video(
             torch.cat(synced_video_frames), 
             video_frames, 
             boxes, 
             affine_matrices
         )
+
+        del all_latents, synced_video_frames, whisper_feature, whisper_chunks
+        del video_frames, faces, audio_samples
+        torch.cuda.empty_cache()
 
         if is_train:
             self.unet.train()

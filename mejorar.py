@@ -11,6 +11,24 @@ from gfpgan import GFPGANer
 from utils.paths import CHECKPOINTS_DIR
 
 class MejoraService:
+    _instance = None
+
+    @classmethod
+    def get(cls):
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    @classmethod
+    def unload(cls):
+        if cls._instance is not None:
+            cls._instance._cleanup()
+
+    def _cleanup(self):
+        self.restorer = None
+        self.restorer2 = None
+        self.face_net = None
+
     def __init__(self):
         self.restorer = None
         self.restorer2 = None

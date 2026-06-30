@@ -492,8 +492,10 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
         return super().load_state_dict(state_dict=state_dict, strict=strict)
 
     @classmethod
-    def from_pretrained(cls, model_config: dict, ckpt_path: str, device="cpu"):
+    def from_pretrained(cls, model_config: dict, ckpt_path: str, device="cpu", torch_dtype=None):
         unet = cls.from_config(model_config).to(device)
+        if torch_dtype is not None:
+            unet = unet.to(dtype=torch_dtype)
         if ckpt_path != "":
             zero_rank_log(logger, f"Load from checkpoint: {ckpt_path}")
             ckpt = torch.load(ckpt_path, map_location=device, weights_only=True)
@@ -502,9 +504,14 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
                 resume_global_step = ckpt["global_step"]
             else:
                 resume_global_step = 0
-            unet.load_state_dict(ckpt["state_dict"], strict=False)
+            state_dict = ckpt["state_dict"]
+            if torch_dtype is not None:
+                for k in state_dict:
+                    if isinstance(state_dict[k], torch.Tensor) and state_dict[k].is_floating_point():
+                        state_dict[k] = state_dict[k].to(torch_dtype)
+            unet.load_state_dict(state_dict, strict=False)
 
-            del ckpt
+            del ckpt, state_dict
             torch.cuda.empty_cache()
         else:
             resume_global_step = 0

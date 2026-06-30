@@ -26,6 +26,11 @@ class TTSService:
             cls._instance = cls()
         return cls._instance
 
+    @classmethod
+    def unload(cls):
+        if cls._instance is not None:
+            cls._instance._unload_models()
+
     def _unload_models(self):
         """Libera memoria VRAM"""
         self.model = None
@@ -58,7 +63,7 @@ class TTSService:
             self.whisper = pipeline("automatic-speech-recognition", model="openai/whisper-base", device=self.device)
         return self.whisper
 
-    def generate(self, text, voice_name, ref_audio=None, ref_text=None):
+    def generate(self, text, voice_name, ref_audio=None, ref_text=None, instruct="Natural"):
         voice_key = Path(voice_name).stem
         is_custom = voice_key in self.predefined_voices
         mode = "custom" if is_custom else "base"
@@ -72,7 +77,7 @@ class TTSService:
                     text=text,
                     language="Auto",
                     speaker=voice_key,
-                    instruct="Natural"
+                    instruct=instruct
                 )
             else:
                 audio_path = os.path.join(voces_dir, voice_name)

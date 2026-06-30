@@ -1,5 +1,8 @@
-import argparse
 import os
+# Reduce memory fragmentation on AMD/NVIDIA GPUs
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
+import argparse
 from omegaconf import OmegaConf
 import torch
 from diffusers import AutoencoderKL, DDIMScheduler
@@ -8,11 +11,9 @@ from latentsync.pipelines.lipsync_pipeline import LipsyncPipeline
 from accelerate.utils import set_seed
 from latentsync.whisper.audio2feature import Audio2Feature
 from latentsync.whisper.whisper import load_model
-from DeepCache import DeepCacheSDHelper
 import json
 import subprocess
 import cv2
-import torch
 import gc
 import numpy as np
 from realesrgan import RealESRGANer
@@ -31,7 +32,6 @@ class LipSyncInference:
     def __init__(
             self,
             inference_ckpt_path,
-            enable_deepcache,
             unet_config_path,
             seed):
             
@@ -67,14 +67,17 @@ class LipSyncInference:
             vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-mse", torch_dtype=self.dtype)
             vae.config.scaling_factor = 0.18215
             vae.config.shift_factor = 0
+            vae.enable_slicing()
+            vae.enable_tiling()
 
             unet, _ = UNet3DConditionModel.from_pretrained(
                 OmegaConf.to_container(self.config.model),
                 inference_ckpt_path,
                 device="cpu",
+                torch_dtype=self.dtype,
             )
 
-            unet = unet.to(dtype=self.dtype)
+            unet.set_attention_slice("auto")
 
             self.pipeline = LipsyncPipeline(
                 vae=vae,
@@ -83,11 +86,11 @@ class LipSyncInference:
                 scheduler=scheduler,
             ).to("cuda")
 
-            # use DeepCache
-            if enable_deepcache:
-                helper = DeepCacheSDHelper(pipe=self.pipeline)
-                helper.set_params(cache_interval=3, cache_branch_id=0)
-                helper.enable()
+            # Offload VAE/audio_encoder to CPU when not in use to save VRAM
+            if os.environ.get("LATENTSYNC_CPU_OFFLOAD", "0") == "1":
+                self.pipeline.enable_sequential_cpu_offload()
+
+
 
             if seed != -1:
                 set_seed(seed)

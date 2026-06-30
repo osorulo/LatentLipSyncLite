@@ -267,8 +267,13 @@ class Attention(nn.Module):
                 attention_mask = F.pad(attention_mask, (0, target_length), value=0.0)
                 attention_mask = attention_mask.repeat_interleave(self.heads, dim=0)
 
-        # Use PyTorch native implementation of FlashAttention-2
-        hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask=attention_mask)
+        # Try FlashAttention-2 first, fall back to memory-efficient chunked attention
+        # on platforms where SDPA materializes the full attention matrix (e.g. ROCm/HIP)
+        seq_len = query.shape[2]
+        if seq_len > 2048:
+            hidden_states = self._chunked_attention(query, key, value, attention_mask)
+        else:
+            hidden_states = F.scaled_dot_product_attention(query, key, value, attn_mask=attention_mask)
 
         hidden_states = self.concat_heads(hidden_states)
 
@@ -278,3 +283,22 @@ class Attention(nn.Module):
         # dropout
         hidden_states = self.to_out[1](hidden_states)
         return hidden_states
+
+    def _chunked_attention(self, query, key, value, attention_mask=None):
+        chunk_size = 512
+        seq_len = query.shape[2]
+        output_chunks = []
+        for i in range(0, seq_len, chunk_size):
+            q_chunk = query[:, :, i:i+chunk_size]
+            attn_mask_chunk = None
+            if attention_mask is not None:
+                if attention_mask.dim() == 4:
+                    attn_mask_chunk = attention_mask[:, :, i:i+chunk_size, :]
+                elif attention_mask.dim() == 3:
+                    attn_mask_chunk = attention_mask[:, i:i+chunk_size, :]
+                else:
+                    attn_mask_chunk = attention_mask[i:i+chunk_size, :]
+            out_chunk = F.scaled_dot_product_attention(q_chunk, key, value, attn_mask=attn_mask_chunk)
+            output_chunks.append(out_chunk)
+            del q_chunk, out_chunk
+        return torch.cat(output_chunks, dim=2)
